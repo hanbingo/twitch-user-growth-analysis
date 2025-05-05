@@ -1,0 +1,661 @@
+---
+title: "Exploring Twitch Streaming Data"
+author: "Hanbin Go"
+date: '2025-04-29'
+output: 
+  html_document:
+    number_sections: true
+    fig_caption: true
+    fig_width: 7
+    fig_height: 4.5
+    theme: flatly
+    highlight: tango
+    toc: true
+    toc_float:
+      collapsed: false
+    code_folding: hide
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Introduction
+
+This is an Exploratory Data Analysis for Twitch's streaming and viewership trends, prepared as part of a data challenge for a Data Scientist position at Patreon.
+
+The aim of this challenge is to explore factors related to streamer discoverability and platform engagement, and to predict which streamers are most likely to experience future growth based on historical patterns of viewership, game popularity, and individual streamer performance.
+
+The datasets used in this analysis were compiled from two publicly available Twitch datasets on Kaggle: [Top Games on Twitch 2016-2024](https://www.kaggle.com/datasets/rankirsh/evolution-of-top-games-on-twitch), and [Top 1000 Twitch Streamers Data](https://www.kaggle.com/datasets/hibrahimag1/top-1000-twitch-streamers-data-may-2024).
+
+- `Twitch_global_data.csv` contained monthly aggregated statistics on overall Twitch viewership from January 2016 to September 2024, including metrics such as total hours watched, hours streamed, and average concurrent viewers.
+
+- `Twitch_game_data.csv` contained the top 200 games or categories on Twitch for each month from 2016 to September 2024.
+
+- `Twitch_top_1000_streamers.csv` contained statistics on the top 1000 Twitch streamers, including streaming activity, audience engagement, and most played games, collected from [twitchtracker.com](https://twitchtracker.com/) using web scraping software.
+
+This report is structured to highlight both general trends in Twitch viewership and specific behavioural predictors of follower growth, with actionable implications for streaming platforms.
+
+```{r load_libraries}
+# import libraries
+library(tidyverse) # data wrangling and visualization (includes packages such as ggplot2, tidyr, dplyr)
+library(jtools) # enhanced model summaries
+library(lme4) # linear mixed effects model
+library(ggeffects) # predictions from regression models
+library(scales) # axis formatting for plots
+library(knitr) # tables
+library(kableExtra) # table style
+library(factoextra) # clustering analysis k-means
+library(corrplot) # correlation plot
+```
+
+```{r functions}
+# custom functions
+
+# APA style formatting for plots
+apa_theme <- theme_minimal() +
+  theme(
+    panel.background = element_blank(),
+    panel.grid.major = element_blank(),
+    panel.grid.minor = element_blank(),
+    axis.line = element_line(color = "black"),
+    legend.position = "right"
+  )
+```
+
+## Load Data
+
+The first step involved loading and previewing the datasets to understand their structure and variables.
+*Note: "Just Chatting" on Twitch refers to streams focused on direct interaction with the audience through conversation, rather than specific activities such as gaming or other structured content.*
+```{r load_data}
+# load the CSV files
+global_data <- read_csv("./data/Twitch_global_data.csv", show_col_types = FALSE)
+game_data <- read_csv("./data/Twitch_game_data.csv", show_col_types = FALSE)
+top1000_data <- read_csv("./data/Twitch_top_1000_streamers.csv")
+
+# display a few rows of each dataset
+knitr::kable(head(global_data), caption = "Twitch: Global Data")
+knitr::kable(head(game_data), caption = "Twitch: Game Data")
+knitr::kable(head(top1000_data), caption = "Twitch: Top 1000 Data")
+```
+
+## Preprocess the data
+Renaming columns for consistency in variable names (lowercase), and data variables were created for time series analysis.
+```{r preprocess_data}
+# for consistency, convert the column names to lowercase
+names(global_data) <- tolower(names(global_data))
+names(game_data) <- tolower(names(game_data))
+names(top1000_data) <- tolower(names(top1000_data))
+
+# for the global and game datasets, create a `date' column by combining the month and year
+global_data <- global_data %>% mutate(date = as.Date(paste(year, month, "01", sep = "-")))
+game_data <- game_data %>% mutate(date = as.Date(paste(year, month, "01", sep = "-")))
+```
+
+# Global Twitch Viewership from 2016 to 2024, and the impact of COVID-19
+
+This section investigates long-term trends in Twitch usage and quantifies the impact of COVID-19 lockdowns on platform engagement.
+
+## Visualization of Hours Watched Across the Years
+
+This analysis computed the predicted hours watched for March and April 2020. March 2020 marked the initial implementation of COVID-19 lockdowns in many countries (the World Health Organization declared COVID-19 a global pandemic on March 11, 2020), whereas April 2020 represented the first full month of lockdowns for many countries.
+
+A linear model was fit on pre-pandemic data to estimate what viewership might have looked like without the pandemic. This provides a clear way to detect deviations in actual viewership.
+
+```{r global_hours_watched}
+# filter the pre-COVID-19 global dataset (using February 2020 as the cutoff date)
+precovid_global_data <- global_data %>% 
+                        filter(date <= as.Date("2020-02-01"))
+
+# hours watched during the onset of COVID-19
+covid_onset_hours_watched <- global_data %>%
+                           filter(date %in% as.Date(c("2020-03-01", "2020-04-01"))) %>%
+                           pull(hours_watched)
+                  
+# define dates for predicting hours watched
+dates_to_predict <- data.frame(date = as.Date(c("2020-03-01", "2020-04-01")))
+
+# fit a linear model with the pre-COVID data
+trend_model <- lm(hours_watched ~ date, data = precovid_global_data)
+
+# predict expected hours watched for March and April 2020
+predicted_hours <- predict(trend_model, newdata = dates_to_predict)
+
+# compute the percentage difference between observed and predicted hours watched
+percent_delta <- ((covid_onset_hours_watched - predicted_hours) / predicted_hours)  * 100
+
+# create a data frame for plotting
+covid_impact_df <- data.frame(
+                   date = as.Date(c("2020-03-01", "2020-04-01")),
+                   predicted_hours = predicted_hours,
+                   actual_hours = covid_onset_hours_watched,
+                   percent_delta = percent_delta,
+                   percent_delta_rounded = paste0(round(percent_delta, 2), "%")
+                   )
+
+# plotting the impact of COVID on hours watched
+hours_watched_plot <- ggplot(global_data, aes(x = date, y = hours_watched/1e9)) +
+                     # data points
+                     geom_line(color = "#6b3bc3", size = 1.1) +
+                     geom_point(alpha = 0.7, size = 1.8) +
+  
+                     # vertical line representing the COVID-19 onset: global pandemic
+                     geom_vline(aes(xintercept = as.Date("2020-03-01"), linetype = "COVID-19 Lockdown Onset"),
+                                color = "red", alpha = 0.7, show.legend = TRUE) + 
+  
+                     # vertical line showing the difference between predicted versus actual hours watched
+                     geom_segment(data = covid_impact_df, aes(x = date, xend = date, 
+                                                              y = predicted_hours/1e9, yend = actual_hours/1e9),
+                                  color = "red", size = 0.5, linetype = "solid", alpha = 0.7) + 
+                     # visual points to distinguish predicted versus actual hours
+                     geom_point(data = covid_impact_df, aes(x = date, y = predicted_hours/1e9, color = "Predicted Hours"), 
+                               shape = 4, size = 3, stroke = 1.5) +
+                     geom_point(data = covid_impact_df, aes(x = date, y = actual_hours/1e9, color = "Actual Hours"), 
+                               shape = 18, size = 4) +
+  
+                     # label the % increase from predicted
+                     geom_text(data = covid_impact_df, aes(x=date, y=(predicted_hours + actual_hours)/2/1e9, 
+                                                           label=percent_delta_rounded),
+                               color = "black", size = 4, hjust = -0.5) +
+                     # colour coding
+                     scale_color_manual(
+                      name = "Observed vs Predicted", 
+                      values = c("Predicted Hours" = "blue", "Actual Hours" = "red")
+                      ) +
+                      scale_linetype_manual(
+                        name = "", 
+                        values = c("COVID-19 Lockdown Onset" = "longdash")
+                      ) +
+                     labs(title = "Global Twitch Hours Watched from 2016 to 2024",
+                          x = "Date",
+                          y = "Hours Watched (in Billions)",
+                     ) +
+                     # define plot theme
+                     apa_theme +
+                     theme(axis.text.x = element_text(angle = 45, hjust = 1),
+                           legend.position = c(0,1),
+                           legend.justification = c(0,1),
+                           legend.title = element_blank()) +
+                     # custom x and y axis labels
+                     scale_x_date(date_labels = "%b %Y", date_breaks = "4 months", 
+                                  limits = c(as.Date("2016-01-01"), as.Date("2024-09-01")),
+                                  expand = c(0,0)) +
+                     scale_y_continuous(labels = label_number(suffix = "B")) +
+                     scale_linetype_manual(values = c("COVID-19 Lockdown Onset" = "longdash")) #dashed line
+
+# print plot
+hours_watched_plot
+```
+
+The figure displays the global hours watched on Twitch from January 2016 to September 2024. Overall, viewership exhibited steady growth over time, with a notable deviation (sudden increase) in early 2020. The vertical dashed line marks March 2020, corresponding to the onset of COVID-19 lockdowns in many countries. Following this event, hours watched increased by **`r round(percent_delta[1], 2)`%** in March relative to the predicted trend based on pre-pandemic data. In April 2020, during the first full month of widespread lockdowns, hours watched further increased by **`r round(percent_delta[2], 2)`%**, reflecting a substantial surge in global Twitch engagement.
+
+## Visualization of Average Concurrent Viewers Across the Years
+To complement the previous analysis, average concurrent viewers were examined to assess the extent to which Twitch retained elevated engagement levels beyond the pandemic period.
+
+```{r global_average_viewers}
+
+# group by year and give shading id
+year_min_max_classify <- global_data %>%
+  group_by(year) %>%
+  summarise(xmin = min(date), xmax = max(date) + months(1)) %>% # plus 1 month to remove buffer border between the shades
+  mutate(
+    # alternate shading
+    shading = factor(year %% 2)
+  )
+
+
+avg_viewer_plot <- ggplot(global_data, aes(x = date, y = avg_viewers/1e6)) +
+                     # shading by year
+                     geom_rect(data = year_min_max_classify,
+                               aes(xmin = xmin, xmax = xmax, ymin = -Inf, ymax = Inf, fill = shading),
+                               inherit.aes = FALSE, alpha = 0.2) +
+                     scale_fill_manual(values = c ("white","grey")) +
+                     guides(fill = "none") +
+                     
+                     # data points
+                     geom_line(color = "#d568dc", size = 1.1) +
+                     geom_point(alpha = 0.7, size = 1.8) +
+  
+                     # vertical line representing the COVID-19 onset: global pandemic
+                     geom_vline(aes(xintercept = as.Date("2020-03-01"), linetype = "COVID-19 Lockdown Onset"),
+                                color = "red", alpha = 0.7, show.legend = TRUE) + 
+                     # labels
+                     labs(title = "Global Twitch Viewership from 2016 to 2024",
+                          x = "Date",
+                          y = "Average Concurrent Viewers (in Millions)") +
+                      
+                     # custom theme
+                     apa_theme +
+                     theme(axis.text.x = element_text(angle = 45, hjust = 1),
+                           legend.position = c(0,1),
+                           legend.justification = c(0,1),
+                           legend.title = element_blank()) +
+  
+                      # custom x and y axis
+                      scale_x_date(date_labels = "%b %Y", date_breaks = "4 months", 
+                                  limits = c(as.Date("2016-01-01"), as.Date("2024-09-01")),
+                                  expand = c(0,0)) +
+                     scale_y_continuous(labels = label_number(suffix = "M")) +
+                     scale_linetype_manual(values = c("COVID-19 Lockdown Onset" = "longdash"))
+
+# print plot                  
+avg_viewer_plot
+
+# generate table of viewership changes across the years
+# filter by complete years: 12 months
+complete_years <- global_data %>%
+  count(year) %>%
+  filter(n == 12) %>%
+  pull(year)
+
+# average viewers summary by year
+yearly_summary <- global_data %>%
+  # filter by complete years
+  filter(year %in% complete_years) %>%
+  group_by(year) %>%
+  summarise(
+    total_avg_viewers = mean(avg_viewers, na.rm = TRUE)
+  ) %>%
+  arrange(year) %>%
+  mutate(
+    # compute change in percentage year-over-year using the lag function
+    percent_change = (total_avg_viewers - lag(total_avg_viewers)) / lag(total_avg_viewers) * 100
+  )
+
+# display table
+yearly_summary %>%
+  mutate(
+    total_avg_viewers_millions = round(total_avg_viewers / 1e6, 2),
+    percent_change = round(percent_change, 2)
+  ) %>%
+  select(year, total_avg_viewers_millions, percent_change) %>%
+  kable(
+    format = "html",
+    caption = "Annual Change in Average Twitch Viewership Relative to the Prior Year (2016–2023)",
+    col.names = c("Year ", " Total Average Concurrent Viewers (Millions) ", " Percent Change (%)"),
+    align = "c"
+  ) %>%
+  # table style
+  kable_styling(
+    full_width = TRUE,
+    bootstrap_options = c("striped"))
+```
+
+Similar to total hours watched, average concurrent viewership steadily increased from 2016 through the COVID-19 lockdowns. A sharp rise in average concurrent viewers followed the onset of lockdowns in March 2020, shown by the vertical dashed line.
+
+After the initial COVID-19 surge, average viewership stayed elevated but showed slight declines in 2022 and 2023, with decreases of about **`r round(tail(yearly_summary$percent_change,2)[1], 2)`%** and **`r round(tail(yearly_summary$percent_change,2)[2], 2)`%**, respectively. Despite these drops, viewership remained much higher than pre-pandemic levels, suggesting that Twitch retained a larger engaged audience after the lockdown period.
+
+## Correlation between Hours Watched and Average Concurrent Viewers
+This correlation check validates whether global hours watched and average viewer counts move together, confirming internal consistency and helping contextualize user engagement.
+
+```{r}
+# compute correlation
+corr_hours_viewers <- cor(global_data$hours_watched, global_data$avg_viewers)
+
+# Correlation plot between hours watched and Average Concurrent Viewers
+corr_engagement_plot <- ggplot(global_data, aes(x = hours_watched/1e9, y = avg_viewers/1e6, color = year)) +
+  geom_point(alpha = 0.6, size = 2) +
+  geom_smooth(method = "lm", se = TRUE, colour = "purple", size = 1) +
+  
+  # add the correlation coefficient
+  geom_text(
+    aes(),
+    x = max(global_data$hours_watched/1e9) * 0.5, 
+    y = max(global_data$avg_viewers/1e6) * 0.8,
+    label = paste0("italic(r) == ", round(corr_hours_viewers, 3)),
+    color = "black",
+    parse = TRUE,
+    size = 4,
+  ) +
+  
+  labs(title = "Relationship Between Hours Streamed and Average Concurrent Viewers",
+       x = "Hours Streamed (in Billions)",
+       y = "Average Concurrent Viewers (in Millions)") +
+  apa_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  scale_y_continuous(labels = label_number(suffix = "M")) +
+  scale_x_continuous(labels = label_number(suffix = "B"))
+
+corr_engagement_plot
+```
+
+A strong positive correlation between hours watched and average concurrent viewers was observed, suggesting that months with more viewers tended to also have higher total viewing time.
+
+This section explores which categories consistently attract viewers and how content trends have evolved over time.
+
+# Visualizing the Top 5 Games/Categories Across the Years
+Top performing games are defined by the level of engagement across the years, in this case hours watched.
+
+## What Should Streamers Stream?
+
+```{r top_5_games}
+# define top 5 games
+top5_games <- game_data %>%
+  group_by(game) %>%
+  summarise(total_hours_watched = sum(hours_watched, na.rm = TRUE)) %>%
+  arrange(desc(total_hours_watched)) %>%
+  slice(1:5) %>% # change value to include more or less of the top rankings
+  pull(game)
+
+# filter data by the top 10 games 
+top5_game_data <- game_data %>%
+  filter(game %in% top5_games)
+
+# plot
+top5_games_plot <- ggplot(top5_game_data, aes(x = date, y = hours_watched / 1e6, color = factor(game, levels = top5_games))) +
+  geom_line(size = 1, alpha = 0.8) +
+  labs(title = "Twitch's Top 5 Games: Hours Watched Trend (2016–2024)",
+       x = "Date",
+       y = "Hours Watched (in Millions)",
+       color = "Game/Category") +
+  apa_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "right") +
+  scale_color_brewer(palette = "Set1") +
+  # custom x and y axis labels
+  scale_x_date(date_labels = "%Y",
+  date_breaks = "1 year",
+  limits = c(as.Date("2016-01-01"), as.Date("2024-09-01")),
+  expand = c(0, 0))+
+  scale_y_continuous(labels = label_number(suffix = "M"))
+
+top5_games_plot
+```
+
+Twitch was initially dominated by gaming content; however, in recent years, non-gaming categories such as Just Chatting have grown in popularity. Originally part of the broader IRL category, Just Chatting focuses on interacting with viewers through webcam conversations and has become one of the most watched categories on the platform.
+
+# What Makes a Top Streamer?
+The following sections focus on individual streamer behaviours and the characteristics of successful streamers, based on the Top 1000 dataset.
+
+## Who are the Top Streamers on Twitch?
+Descriptive statistics were used to explore language use, content categories, and weekly activity patterns among top streamers.
+
+```{r top_streamer_EDA}
+# language distribution
+top1000_data %>%
+  count(language, sort = TRUE) %>%
+  ggplot(aes(x = reorder(language, n), y = n, fill = n)) +
+  geom_col(alpha = 0.9) +
+  coord_flip() +
+  apa_theme + # custom APA style themed plot
+  scale_fill_gradient(low = "#b09adf", high = "#6b3bc3") + # gradient fill
+  labs(title = "Top Streamers by Language", x = "Language", y = "Number of Streamers") +
+  guides(fill = "none") # remove legend
+
+# top 10 most streamed game
+top1000_data %>%
+  count(most_streamed_game, sort = TRUE) %>%
+  slice_head(n = 10) %>%
+  ggplot(aes(x = reorder(most_streamed_game, n), y = n, fill = n)) +
+  geom_col(alpha = 0.9) +
+  coord_flip() +
+  apa_theme +
+  guides(fill = "none") + 
+  scale_fill_gradient(low = "#b09adf", high = "#6b3bc3") + 
+  labs(title = "Top 10 Most Streamed Games/Categories", x = "Game/Category", y = "Number of Streamers")
+
+# most active days
+top1000_data %>%
+  count(most_active_day, sort = TRUE) %>%
+  ggplot(aes(x = reorder(most_active_day, n), y = n, fill = n)) +
+  geom_col(alpha = 0.9) +
+  coord_flip() +
+  apa_theme +
+  guides(fill = "none") +
+  scale_fill_gradient(low = "#b09adf", high = "#6b3bc3") + 
+  labs(title = "Most Active Streaming Day", x = "Day of Week", y = "Number of Streamers")
+
+# day with most followers gained
+top1000_data %>%
+  count(day_with_most_followers_gained, sort = TRUE) %>%
+  ggplot(aes(x = reorder(day_with_most_followers_gained, n), y = n, fill = n)) +
+  geom_col(alpha = 0.9) +
+  coord_flip() +
+  apa_theme +
+  scale_fill_gradient(low = "#b09adf", high = "#6b3bc3") + 
+  labs(title = "Day with Most Followers Gained", x = "Day of Week", y = "Number of Streamers") +
+  guides(fill = "none")
+
+```
+
+## Assessing Relationships Between Behavioural Metrics
+
+To examine potential multicollinearity and select key predictors for modelling, I computed the Pearson correlation matrix among continuous behavioural variables. These correlations help assess which behavioural variables (e.g., average stream duration, average number of viewers) may jointly influence follower growth and should be considered in the mixed model.
+
+```{r corr_matrix}
+# select key behavioural predictors
+corr_dat <- top1000_data %>% 
+  select("Followers Gained per Stream" = followers_gained_per_stream,
+         "Average Stream Duration" = average_stream_duration,
+         "Average Viewers per Stream" = avg_viewers_per_stream,
+         "Average Games per Stream" = avg_games_per_stream,
+         "Total Followers" = total_followers,
+         "Active Days per Week" = active_days_per_week
+         )
+
+# compute correlation matrix
+cor_matrix <- cor(corr_dat)
+
+# custom colour gradient
+red_purp_gradient <- colorRampPalette(c("#e60026", "#ffffff", "#6b3bc9"))(100)
+
+# plot correlation matrix
+corrplot(cor_matrix, method = "color", 
+         type = "upper", 
+         tl.cex = 0.8,  # size of text
+         tl.col = "black", # colour of text
+         col = red_purp_gradient, #custom 
+         addCoef.col = "black", # show correlation values
+         number.cex = 0.8, # size of coefficients 
+         diag = FALSE # remove diagonal
+)
+```
+
+Plotting histograms to visualize the normality of each of the variables of interest.
+
+```{r normality_plot}
+# select relevant variables and reshape for faceting
+top1000_data %>% select(
+    # rename for the plot
+    "Average Stream Duration" = average_stream_duration,
+    "Average Viewers per Stream" = avg_viewers_per_stream,
+    "Average Games per Stream" = avg_games_per_stream,
+    "Followers Gained per Stream" = followers_gained_per_stream
+  ) %>%
+  pivot_longer(cols = everything(), names_to = "variable", values_to = "value") %>%
+  ggplot(aes(x = value, fill = variable)) +
+  geom_histogram(color = "black", alpha = 0.7, bins = 50) +
+  facet_wrap(~ variable, scales = "free", ncol = 2) +
+  apa_theme +
+  scale_fill_manual(values = rep("#6b3bc3", 4)) +
+  labs(
+    title = "Distributions of Key Variables of Interest",
+    y = "Count") +
+  guides(fill = "none")
+```
+
+Right skewed, so variables such as average viewers per stream and average games per stream can benefit from logarithmic transformation, but for simplicity of interpretation, I move forward without any transformations.
+
+## What Drives Followers Growth? (Linear Mixed Effects Model)
+A linear mixed-effects model was used to predict the **number of followers gained per stream** based on **average viewers per stream**, **average stream duration**, and **average games per stream**, while accounting for random intercepts by streamers’ **most-streamed game**.
+
+```{r lme_models}
+
+# null model
+null_model <- lmer(followers_gained_per_stream ~ 1  + (1 | most_streamed_game), data = top1000_data)
+null_model_summary <- summ(null_model)
+# print 
+null_model_summary
+
+# model with three predictors of interest
+lme_model <- lmer(followers_gained_per_stream ~ avg_viewers_per_stream + average_stream_duration + avg_games_per_stream + 
+                     (1 | most_streamed_game), data = top1000_data)
+
+lme_model_summary <- summ(lme_model)
+# print
+lme_model_summary
+
+# logarithmic transformations to accomodate the right skewness
+top1000_data <- top1000_data %>% 
+  mutate(log_avg_viewers = log1p(avg_viewers_per_stream),
+         log_avg_duration = log1p(average_stream_duration),
+         log_avg_games = log1p(avg_games_per_stream)
+         )
+
+lme_model_log <- lmer(followers_gained_per_stream ~ log_avg_viewers + log_avg_duration + log_avg_games + 
+                        (1 | most_streamed_game), data = top1000_data)
+
+
+lme_model_log_summary <- summ(lme_model_log)
+# print (optional): excluded from presentation
+#lme_model_log_summary
+
+# compare model fit (optional): excluded from presentation
+#anova(lme_model, lme_model_log)
+```
+
+The intraclass correlation coefficient (ICC = 0.07) from the null model suggests that approximately 7% of the variance in follower gain can be attributed to differences across streamed game categories. While this value was relatively low, including a random intercept was justified, as different content categories may inherently vary in baseline levels of followers gained.
+
+Average Viewers per stream was a significant positive predictor of follower gain. Conversely, average stream duration was negatively associated with follower gain. Lastly, average games per stream was also a significant positive predictor.
+
+## Plotting the Linear Mixed Effects Model
+To interpret the fixed effects from the model, visualizations were performed using the predicted values of follower gain as a function of each behavioural predictor, holding other variables constant. These plots help isolate the independent contribution of each variable.
+
+```{r lme_model_plot, fig.height = 8, fig.width = 8}
+
+# generate predictions using ggpredict
+predict_avg_viewers <- ggpredict(lme_model, terms = "avg_viewers_per_stream", add.data = TRUE)
+predict_stream_duration <- ggpredict(lme_model, terms = "average_stream_duration", add.data = TRUE)
+predict_num_games <- ggpredict(lme_model, terms = "avg_games_per_stream", add.data = TRUE)
+
+# plotting
+pred_viewers_plot <- plot(predict_avg_viewers, connect.lines = TRUE, color = "#6b3bc3") +
+  labs(
+    title = "Effect of Average Viewers per Stream",
+    x = "Average Viewers per Stream",
+    y = "Predicted Followers Gained per Stream"
+  ) +
+  apa_theme
+
+pred_duration_plot <- plot(predict_stream_duration, connect.lines = TRUE, color = "#6b3bc3") +
+  labs(
+    title = "Effect of Average Stream Duration",
+    x = "Average Stream Duration (Hours)",
+    y = "Predicted Followers Gained per Stream"
+  ) +
+  apa_theme 
+
+pred_num_games_plot <- plot(predict_num_games, connect.lines = TRUE, color = "#6b3bc3") +
+  labs(
+    title = "Effect of Games per Stream",
+    x = "Average Games per Stream",
+    y = "Predicted Followers Gained per Stream"
+  ) +
+  apa_theme 
+
+# print plots
+cowplot::plot_grid(pred_viewers_plot,
+                   pred_duration_plot,
+                   pred_num_games_plot,
+                   ncol = 2)
+```
+
+# Grouping the Behaviour of Top 1000 Streamers
+Used k-means clustering to identify latent behavioural grouping among the top 1000 streamers. Variables included, **average viewers per stream**, **average stream duration**, and **active days per week**. The three variables were chosen to focus on the average engagement and the streamer's commitment/effort. PCA was used to reduce the three dimensions to two for plotting This analysis highlighted varied paths to success.
+
+```{r}
+
+# prepare features for clustering
+cluster_df <- top1000_data %>%
+  select(avg_viewers_per_stream, average_stream_duration, active_days_per_week) %>%
+  drop_na() %>%
+  scale()  # standardize for k-means
+
+# elbow method to find optimal number of clusters
+factoextra::fviz_nbclust(cluster_df, kmeans, method = "wss")
+
+# run k-means with k = 4 based on elbow point
+set.seed(2025)  # reproducibility
+km_model <- kmeans(cluster_df, 4, nstart = 50) # try 50 different random starting assignments then select the best results
+
+# cluster assignment to the original dataframe
+top1000_data$cluster <- factor(km_model$cluster)
+
+# table of summary of key behaviours by cluster
+cluster_table <- top1000_data %>%
+                    group_by(cluster) %>%
+                      summarise(
+                        avg_viewers_per_stream = mean(avg_viewers_per_stream, na.rm = TRUE),
+                        average_stream_duration = mean(average_stream_duration, na.rm = TRUE),
+                        active_days_per_week = mean(active_days_per_week, na.rm = TRUE),
+                        followers_gained_per_stream = mean(followers_gained_per_stream, na.rm = TRUE),
+                        n = n()
+                      )
+
+knitr::kable(cluster_table, format = "html", 
+             caption = "Behavioural Summary of Streamer Clusters (Top 1000 Streamers)",
+             col.names = c("Cluster", "Avg. Viewers", "Avg. Stream Duration (hrs)", 
+                           "Active Days/Week", "Followers Gained/Stream", "n")) %>%
+  kable_styling(
+    full_width = TRUE,
+    bootstrap_options = c("striped"))
+
+# label and categorize the streamer categories 
+top1000_data$cluster_label <- recode_factor(top1000_data$cluster,
+                                            `1` = "Very Active Streamers",
+                                            `2` = "Efficient Casual Streamers",
+                                            `3` = "Long-Hours Grinders",
+                                            `4` = "Top Streamer Stars")
+
+# labeling the km_model
+km_model_labelled <- km_model
+km_model_labelled$cluster <- factor(km_model$cluster,
+                                    levels = c(1, 2, 3, 4),
+                                    labels = c("Very Active Streamers", "Efficient Casual Streamers", 
+                                               "Long-Hours Grinders", "Top Streamer Stars"))
+
+# plotting visual clusters using PCA given the number of variables is greater than 3.
+cluster_plot <- factoextra::fviz_cluster(km_model_labelled, data = cluster_df, geom = "point", 
+                         ellipse.type = "norm", repel = TRUE, show.clust.cent = TRUE) +
+  labs(title = "Streamer Behavioural Clusters (PCA)",
+       subtitle = "Based on Average Viewers, Stream Duration, and Active Days per Week",
+       x = "Principal Component 1",
+       y = "Principal Component 2"
+       ) +
+  apa_theme
+
+
+cluster_plot
+
+```
+
+Clusters revealed distinct streamer classifications, including consistent active streamers, casual, yet efficient streamers, long-hours broadcasters, and top-tier stars. The post-hoc analysis revealed varying follower gain efficiency.
+
+These results highlight that most streamers achieve success through consistent activity, with short-to-moderate stream durations (e.g., 5 hours per stream), along with more efficient part-time streamers also emerge. long-hour streamers, while highly active, may face diminishing follower returns.
+
+```{r}
+followers_violin_plot <- ggplot(top1000_data, aes(x = cluster_label, y = followers_gained_per_stream, fill = cluster_label)) +
+  geom_violin(alpha = 0.3, trim = FALSE) +
+  geom_boxplot(width = 0.15, outlier.shape = NA, alpha = 0.8) +
+  labs(
+    title = "Follower Growth by Behavioural Cluster",
+    x = "Cluster Category",
+    y = "Followers Gained Per Stream"
+  ) +
+  apa_theme +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "none"
+        )
+
+followers_violin_plot
+
+
+```
+
+The distribution of follower gains varied significantly by behavioural cluster. Notably, Efficient Casual Streamers achieved higher average follower gains with shorter and less frequent streams, while Long-Hours Grinders, despite streaming for much longer durations, saw diminishing returns. This suggests that consistent, focused engagement can outperform excessive stream duration when it comes to follower growth.
+
+# Conclusion 
+
+In summary, follower growth on Twitch was shaped by behavioural consistency, content strategy, and stream duration, rather than total hours or audience size. While global viewership increased substantially during the pandemic, sustained growth required deliberate creator strategies. The top 1000 streamers were predominantly Very Active Streamers, averaging 4.8 days per week and 5.9 hours per session. However, Efficient Casual Streamers, who streamed only 1.9 days per week for 4.8 hours on average, achieved high follower gains per stream. This pattern demonstrated that shorter, well-targeted sessions were often more effective.
+
+Streaming on Sundays was also associated with greater follower growth. These results suggest that moderate, focused effort combined with interactive content, such as Just Chatting, supports follower acquisition more effectively than consistently long-duration streams. For platforms such as Patreon, prioritizing features that encourage engagement (e.g., Just Chatting), content variety, and weekly consistency may help creators sustain long-term audience growth. Direct audience interaction through conversational formats can be especially effective when the primary objective is user engagement and entertainment.
