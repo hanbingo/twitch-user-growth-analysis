@@ -1,6 +1,6 @@
 # Twitch User Growth Analysis
 
-This project was completed as part of a data science challenge during the hiring process for Patreon. I used a publicly available Twitch dataset to analyze user engagement and streamer growth patterns. Given Patreon's exploration of live streaming features, the objective was to simulate how behavioural insights could inform platform strategies that support sustainable creator growth.
+This project was completed as part of a data science challenge during the hiring process for Patreon. While the challenge permitted the use of any publicly available dataset, I chose to analyse Twitch data to simulate how behavioural insights could inform platform strategies. Motivated by Patreon’s plan to implement live-streaming features on their platform, this analysis focused on identifying patterns of user engagement and streamer growth that contribute to sustainable success on creator-driven platforms.
 
 ## Overview
 
