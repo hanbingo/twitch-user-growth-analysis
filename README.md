@@ -1,6 +1,6 @@
 # Twitch User Growth Analysis
 
-This project was completed as part of a data science challenge during the hiring process for Patreon. While the challenge permitted the use of any publicly available dataset, I chose to analyse Twitch data to simulate how behavioural insights could inform platform strategies. Motivated by Patreon’s plan to implement live-streaming features on their platform, this analysis focused on identifying patterns of user engagement and streamer growth that contribute to sustainable success on creator-driven platforms.
+This project was completed as part of a data science challenge during the hiring process for Patreon. While the challenge permitted the use of any publicly available dataset, I chose to analyse Twitch data to simulate how behavioural insights could inform platform strategies. Motivated by Patreon’s plan to implement live-streaming features on their platform, this analysis focused on identifying patterns of user engagement and streamer growth that contribute to sustainable success on creator-driven platforms. [Click here to view the full HTML report](https://hanbingo.github.io/twitch-user-growth-analysis/)
 
 ## Overview
 
