@@ -560,7 +560,7 @@ cowplot::plot_grid(pred_viewers_plot,
                    ncol = 2)
 ```
 
-# Grouping the Behaviour of Top 1000 Streamers
+# Not All Top Streamers Grow the Same Way: Grouping Different Growth Strategies of Top 1000 Streamers
 Used k-means clustering to identify latent behavioural grouping among the top 1000 streamers. Variables included, **average viewers per stream**, **average stream duration**, and **active days per week**. The three variables were chosen to focus on the average engagement and the streamer's commitment/effort. PCA was used to reduce the three dimensions to two for plotting This analysis highlighted varied paths to success.
 
 ```{r}
