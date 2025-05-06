@@ -581,31 +581,33 @@ km_model <- kmeans(cluster_df, 4, nstart = 50) # try 50 different random startin
 # cluster assignment to the original dataframe
 top1000_data$cluster <- factor(km_model$cluster)
 
-# table of summary of key behaviours by cluster
-cluster_table <- top1000_data %>%
-                    group_by(cluster) %>%
-                      summarise(
-                        avg_viewers_per_stream = mean(avg_viewers_per_stream, na.rm = TRUE),
-                        average_stream_duration = mean(average_stream_duration, na.rm = TRUE),
-                        active_days_per_week = mean(active_days_per_week, na.rm = TRUE),
-                        followers_gained_per_stream = mean(followers_gained_per_stream, na.rm = TRUE),
-                        n = n()
-                      )
-
-knitr::kable(cluster_table, format = "html", 
-             caption = "Behavioural Summary of Streamer Clusters (Top 1000 Streamers)",
-             col.names = c("Cluster", "Avg. Viewers", "Avg. Stream Duration (hrs)", 
-                           "Active Days/Week", "Followers Gained/Stream", "n")) %>%
-  kable_styling(
-    full_width = TRUE,
-    bootstrap_options = c("striped"))
-
 # label and categorize the streamer categories 
 top1000_data$cluster_label <- recode_factor(top1000_data$cluster,
                                             `1` = "Very Active Streamers",
                                             `2` = "Efficient Casual Streamers",
                                             `3` = "Long-Hours Grinders",
                                             `4` = "Top Streamer Stars")
+
+# table of summary of key behaviours by cluster
+cluster_table <- top1000_data %>%
+                    group_by(cluster, cluster_label) %>%
+                      summarise(
+                        avg_viewers_per_stream = mean(avg_viewers_per_stream, na.rm = TRUE),
+                        average_stream_duration = mean(average_stream_duration, na.rm = TRUE),
+                        active_days_per_week = mean(active_days_per_week, na.rm = TRUE),
+                        followers_gained_per_stream = mean(followers_gained_per_stream, na.rm = TRUE),
+                        n = n(),
+                        .groups = "drop"
+                      )
+
+knitr::kable(cluster_table, format = "html", 
+             caption = "Behavioural Summary of Streamer Clusters (Top 1000 Streamers)",
+             col.names = c("Cluster", "Group Label", "Avg. Viewers", "Avg. Stream Duration (hrs)", 
+                           "Active Days/Week", "Followers Gained/Stream", "n")) %>%
+  kable_styling(
+    full_width = TRUE,
+    bootstrap_options = c("striped"))
+
 
 # labeling the km_model
 km_model_labelled <- km_model
