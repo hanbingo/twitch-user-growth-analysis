@@ -1,0 +1,10 @@
+# Treat R Markdown as R code for GitHub language detection
+*.Rmd linguist-language=R
+
+# Ignore large rendered HTML report in language detection
+index.html linguist-documentation
+hanbin_go_2025_04_29.html linguist-documentation
+
+# Not tracked
+.DS_Store export-ignore
+.Rhistory export-ignore
