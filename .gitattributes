@@ -1,10 +1,12 @@
-# Treat R Markdown as R code for GitHub language detection
+# Treat R Markdown as R code
 *.Rmd linguist-language=R
 
-# Ignore large rendered HTML report in language detection
-index.html linguist-documentation
-hanbin_go_2025_04_29.html linguist-documentation
+# Treat Jupyter notebooks as Python code
+*.ipynb linguist-language=Python
 
-# Not tracked
+# Ignore rendered HTML reports in language detection
+*.html linguist-documentation
+
+# Ignore macOS and R history files in exports
 .DS_Store export-ignore
 .Rhistory export-ignore
